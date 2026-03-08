@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bt747cli"
+version = "0.1.0"
+description = "Python CLI for MTK-based GPS data loggers (QStarz, i-Blue 747, Holux M-241, etc.)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "GPL-2.0" }
+dependencies = [
+    "pyserial>=3.5",
+    "click>=8.1",
+    "gpxpy>=1.6",
+]
+
+[project.scripts]
+bt747cli = "bt747cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bt747cli*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
