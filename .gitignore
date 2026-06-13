@@ -212,3 +212,4 @@ log
 raw.bin
 tracks
 venv
+*.bin
