@@ -97,3 +97,82 @@ class TestRequestChunk:
         conn = self._make_conn([sentence, ack_ok])
         result = _request_chunk(conn, 0, 4, timeout=1.0)
         assert result == bytes.fromhex("12345678")
+
+
+from bt747cli.protocol import (
+    REC_METHOD_OVERLAP,
+    REC_METHOD_STOP,
+    _compute_end_addr,
+    _query,
+    _query_rec_method,
+)
+
+
+def _sentence(payload: str) -> str:
+    """Build a full PMTK sentence with valid checksum."""
+    return f"${payload}*{_pmtk_checksum(payload)}"
+
+
+def _make_conn(lines: list[str]):
+    """Mock connection yielding *lines* one by one, then '' forever."""
+    conn = MagicMock()
+    it = iter(lines)
+    conn.read_line.side_effect = lambda: next(it, "")
+    return conn
+
+
+class TestQuery:
+    def test_returns_value_field(self):
+        conn = _make_conn([_sentence("PMTK182,3,6,2")])
+        assert _query(conn, 6) == "2"
+
+    def test_ignores_unrelated_replies(self):
+        conn = _make_conn([
+            _sentence("PMTK182,3,7,0000AB00"),  # reply to a different param
+            "$GPGGA,123456.000,4800.0,N,01100.0,E,1,8,1.0,100.0,M,0.0,M,,*XX",
+            _sentence("PMTK182,3,6,1"),
+        ])
+        assert _query(conn, 6) == "1"
+
+    def test_no_reply_returns_none(self):
+        conn = _make_conn([])
+        with patch("bt747cli.protocol.QUERY_TIMEOUT", 0.05):
+            assert _query(conn, 6) is None
+
+
+class TestQueryRecMethod:
+    def test_overlap(self):
+        conn = _make_conn([_sentence("PMTK182,3,6,1")])
+        assert _query_rec_method(conn) == REC_METHOD_OVERLAP
+
+    def test_stop(self):
+        conn = _make_conn([_sentence("PMTK182,3,6,2")])
+        assert _query_rec_method(conn) == REC_METHOD_STOP
+
+    def test_garbage_returns_none(self):
+        conn = _make_conn([_sentence("PMTK182,3,6,xyz")])
+        assert _query_rec_method(conn) is None
+
+
+class TestComputeEndAddr:
+    FLASH = 8 * 1024 * 1024
+
+    def test_stop_mode_downloads_up_to_write_pointer(self):
+        assert _compute_end_addr(0x1234, self.FLASH, REC_METHOD_STOP) == 0x10000
+
+    def test_stop_mode_rounds_up_to_next_sector(self):
+        assert _compute_end_addr(0x10001, self.FLASH, REC_METHOD_STOP) == 0x20000
+
+    def test_overlap_mode_downloads_full_flash(self):
+        # Ring buffer may have wrapped: write pointer says nothing about extent.
+        assert _compute_end_addr(0x1234, self.FLASH, REC_METHOD_OVERLAP) == self.FLASH
+
+    def test_overlap_mode_large_write_ptr_still_full_flash(self):
+        # This is the data-loss case the old heuristic got wrong.
+        assert _compute_end_addr(0x600000, self.FLASH, REC_METHOD_OVERLAP) == self.FLASH
+
+    def test_unknown_method_downloads_full_flash(self):
+        assert _compute_end_addr(0x1234, self.FLASH, None) == self.FLASH
+
+    def test_stop_mode_capped_at_flash_size(self):
+        assert _compute_end_addr(self.FLASH - 1, self.FLASH, REC_METHOD_STOP) == self.FLASH

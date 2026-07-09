@@ -40,6 +40,11 @@ DOWNLOAD_TIMEOUT = 300.0
 # Timeout for single query/response round-trips.
 QUERY_TIMEOUT = 5.0
 
+# Recording method when the log is full (reply to $PMTK182,2,6).
+# Verified against BT747 MtkModel.java:492.
+REC_METHOD_OVERLAP = 1  # ring buffer: oldest data is overwritten
+REC_METHOD_STOP = 2     # logging stops when flash is full
+
 
 def _verify_sentence(sentence: str) -> bool:
     """Return True when the NMEA/PMTK checksum in *sentence* is valid."""
@@ -75,37 +80,48 @@ def _wakeup(conn: SerialConnection) -> bool:
     return False
 
 
-def _query_log_size(conn: SerialConnection) -> int | None:
-    """Query the next-write-address via $PMTK182,2,7.
+def _query(conn: SerialConnection, param: int) -> str | None:
+    """Send $PMTK182,2,<param> and return the value field of the reply.
 
-    Returns the byte offset of the current write pointer (= where the device
-    will write the next record).  When the flash has wrapped this value is
-    SMALL (the write head is near the start of the flash again).  Use
-    _query_flash_size() to determine how much flash to download in that case.
-    Returns None if the query fails.
+    The reply has the form $PMTK182,3,<param>,<value>*CS.
+    Returns the raw value string, or None on timeout/malformed reply.
     """
-    log.debug("Querying log write pointer ($PMTK182,2,7) …")
-    conn.send_command("PMTK182,2,7")
+    log.debug("Querying $PMTK182,2,%d …", param)
+    conn.send_command(f"PMTK182,2,{param}")
+    prefix = f"$PMTK182,3,{param},"
     deadline = time.monotonic() + QUERY_TIMEOUT
     while time.monotonic() < deadline:
         line = conn.read_line()
         if not line:
             continue
         log.debug("rx: %s", line)
-        if not line.startswith("$PMTK182,3,7"):
+        if not line.startswith(prefix):
             continue
-        # Format: $PMTK182,3,7,<hex_value>*XX
-        try:
-            body = line[1:].rsplit("*", 1)[0]
-            value_hex = body.split(",")[3]
-            size = int(value_hex, 16)
-            log.info("Log write pointer: 0x%X (%d bytes).", size, size)
-            return size
-        except (IndexError, ValueError) as exc:
-            log.error("Could not parse log write pointer from '%s': %s", line, exc)
+        body = line[1:].rsplit("*", 1)[0]
+        parts = body.split(",")
+        if len(parts) < 4:
+            log.error("Malformed $PMTK182,3,%d reply: %s", param, line)
             return None
-    log.error("No response to $PMTK182,2,7 query.")
+        return parts[3]
+    log.error("No response to $PMTK182,2,%d query.", param)
     return None
+
+
+def _query_log_size(conn: SerialConnection) -> int | None:
+    """Query the next-write-address via $PMTK182,2,7.
+
+    Returns the byte offset of the current write pointer, or None on failure.
+    """
+    value = _query(conn, 7)
+    if value is None:
+        return None
+    try:
+        size = int(value, 16)
+    except ValueError:
+        log.error("Could not parse log write pointer from '%s'.", value)
+        return None
+    log.info("Log write pointer: 0x%X (%d bytes).", size, size)
+    return size
 
 
 def _flash_size_from_id(flash_id: int) -> int:
@@ -131,25 +147,48 @@ def _query_flash_size(conn: SerialConnection) -> int:
 
     Returns the decoded flash size, or a default of 8 MiB on failure.
     """
-    log.debug("Querying flash chip ID ($PMTK182,2,9) …")
-    conn.send_command("PMTK182,2,9")
-    deadline = time.monotonic() + QUERY_TIMEOUT
-    while time.monotonic() < deadline:
-        line = conn.read_line()
-        if not line:
-            continue
-        log.debug("rx: %s", line)
-        if not line.startswith("$PMTK182,3,9"):
-            continue
-        try:
-            body = line[1:].rsplit("*", 1)[0]
-            flash_id = int(body.split(",")[3], 16)
-            return _flash_size_from_id(flash_id)
-        except (IndexError, ValueError) as exc:
-            log.error("Could not parse flash ID from '%s': %s", line, exc)
-            break
-    log.warning("No response to $PMTK182,2,9 – using 8 MiB default.")
-    return 8 * 1024 * 1024
+    value = _query(conn, 9)
+    if value is None:
+        log.warning("No response to $PMTK182,2,9 – using 8 MiB default.")
+        return 8 * 1024 * 1024
+    try:
+        flash_id = int(value, 16)
+    except ValueError:
+        log.error("Could not parse flash ID from '%s' – using 8 MiB default.", value)
+        return 8 * 1024 * 1024
+    return _flash_size_from_id(flash_id)
+
+
+def _query_rec_method(conn: SerialConnection) -> int | None:
+    """Query the log-full recording method via $PMTK182,2,6.
+
+    Returns REC_METHOD_OVERLAP, REC_METHOD_STOP, or None when unknown.
+    """
+    value = _query(conn, 6)
+    if value is None:
+        return None
+    try:
+        method = int(value)
+    except ValueError:
+        log.error("Could not parse recording method from '%s'.", value)
+        return None
+    names = {REC_METHOD_OVERLAP: "OVERLAP", REC_METHOD_STOP: "STOP"}
+    log.info("Recording method: %d (%s).", method, names.get(method, "unknown"))
+    return method
+
+
+def _compute_end_addr(write_ptr: int, flash_size: int, rec_method: int | None) -> int:
+    """Determine how many bytes of flash to download.
+
+    Mirrors BT747 Controller.startDefaultDownload(): in STOP mode the log
+    never wraps, so downloading up to the write pointer (rounded up to a full
+    0x10000 sector) is sufficient.  In OVERLAP mode — or when the recording
+    method is unknown — the ring buffer may have wrapped and the full flash
+    must be downloaded so the oldest data is not lost.
+    """
+    if rec_method == REC_METHOD_STOP and write_ptr < flash_size:
+        return min((write_ptr + 0xFFFF) & ~0xFFFF, flash_size)
+    return flash_size
 
 
 def _request_chunk(conn: SerialConnection, addr: int, size: int, timeout: float) -> bytes | None:
@@ -251,19 +290,11 @@ def download_log(conn: SerialConnection, progress_callback=None) -> bytes:
         log.error("Could not determine log write pointer – aborting.")
         return b""
 
-    # If the write pointer is larger than one sector's worth of space before the
-    # end, the log has NOT wrapped and we can limit the download.  Otherwise
-    # (write_ptr is small, meaning the flash wrapped) we download the full flash.
-    # Round up to the nearest 0x10000 sector boundary in both cases.
-    if write_ptr > flash_size // 2:
-        # Definitely not wrapped – only download up to write pointer
-        end_addr = (write_ptr + 0xFFFF) & ~0xFFFF
-    else:
-        # Wrapped (or nearly full) – download full flash so no data is missed
-        end_addr = flash_size
+    rec_method = _query_rec_method(conn)
+    end_addr = _compute_end_addr(write_ptr, flash_size, rec_method)
     log.info(
-        "Write pointer: 0x%X, flash: 0x%X → downloading 0x%X bytes.",
-        write_ptr, flash_size, end_addr,
+        "Write pointer: 0x%X, flash: 0x%X, rec method: %s → downloading 0x%X bytes.",
+        write_ptr, flash_size, rec_method, end_addr,
     )
 
     buf = bytearray()
