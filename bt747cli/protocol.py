@@ -6,10 +6,12 @@ MTKLogDownloadHandler.java + BT747Constants.java):
   1. $PMTK000          → wakeup ping; wait for $PMTK001,0,3
   2. $PMTK182,2,7      → query next-write-address (= bytes used in flash)
      Reply: $PMTK182,3,7,<hex_addr>
-  3. $PMTK182,7,<start_hex8>,<len_hex8>  → request log chunk
+  3. $PMTK182,2,6      → query recording method when the log is full
+     Reply: $PMTK182,3,6,<1=overlap|2=stop>; overlap → download full flash
+  4. $PMTK182,7,<start_hex8>,<len_hex8>  → request log chunk
      Reply: $PMTK182,8,<start_hex8>,<hexdata>
              then: $PMTK001,182,7,3  (success ACK)
-  4. Repeat step 3 in 0x800-byte chunks (BT747 default) until fully downloaded.
+  5. Repeat step 4 in 0x800-byte chunks (BT747 default) until fully downloaded.
      Never cross a 0x10000 boundary within one request (firmware limitation).
 
 BT747Constants:
