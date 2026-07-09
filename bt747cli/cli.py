@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
@@ -37,16 +37,37 @@ from .protocol import download_log
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _parse_datetime(value: str, *, end_of_day: bool) -> datetime:
+    """Parse YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS into a UTC datetime.
+
+    Date-only values expand to 00:00:00, or to 23:59:59.999999 when
+    *end_of_day* is set — so a bare end date includes the whole day.
+    """
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    try:
+        dt = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise click.BadParameter(f"Expected YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, got '{value}'")
+    if end_of_day:
+        dt += timedelta(days=1) - timedelta(microseconds=1)
+    return dt
+
+
 def _parse_date(ctx, param, value: str | None) -> datetime | None:
-    """Click callback: parse YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS into a UTC datetime."""
+    """Click callback for --from."""
     if value is None:
         return None
-    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    raise click.BadParameter(f"Expected YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, got '{value}'")
+    return _parse_datetime(value, end_of_day=False)
+
+
+def _parse_date_end(ctx, param, value: str | None) -> datetime | None:
+    """Click callback for --to: a bare date means end of that day (inclusive)."""
+    if value is None:
+        return None
+    return _parse_datetime(value, end_of_day=True)
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -170,7 +191,7 @@ def cmd_download(ctx, port: str, baud: int, output: str, timeout: float) -> None
 @click.option("--input", "-i", "input_file", required=True, type=click.Path(exists=True, dir_okay=False), help="Input .bin file.")
 @click.option("--output", "-o", required=True, type=click.Path(), help="Output .gpx file, or directory when --split-days is used.")
 @click.option("--from", "date_from", default=None, callback=_parse_date, expose_value=True, is_eager=True, help="Start date/time (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, UTC).")
-@click.option("--to", "date_to", default=None, callback=_parse_date, expose_value=True, is_eager=True, help="End date/time (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, UTC).")
+@click.option("--to", "date_to", default=None, callback=_parse_date_end, expose_value=True, is_eager=True, help="End date/time (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, UTC).")
 @click.option("--split-days", is_flag=True, default=False, help="Write one GPX file per day.")
 @click.option("--track-name", default="bt747cli track", show_default=True, help="Track name in GPX (ignored when --split-days uses date as name).")
 @click.pass_context
@@ -203,7 +224,7 @@ def cmd_export(ctx, input_file: str, output: str, date_from, date_to, split_days
 @click.option("--output", "-o", required=True, type=click.Path(), help="Output .gpx file, or directory when --split-days is used.")
 @click.option("--save-bin", default=None, type=click.Path(dir_okay=False), help="Also save raw binary to this file.")
 @click.option("--from", "date_from", default=None, callback=_parse_date, expose_value=True, is_eager=True, help="Start date/time filter (UTC).")
-@click.option("--to", "date_to", default=None, callback=_parse_date, expose_value=True, is_eager=True, help="End date/time filter (UTC).")
+@click.option("--to", "date_to", default=None, callback=_parse_date_end, expose_value=True, is_eager=True, help="End date/time filter (UTC).")
 @click.option("--split-days", is_flag=True, default=False, help="Write one GPX file per day.")
 @click.option("--timeout", default=300.0, show_default=True, help="Download timeout in seconds.")
 @click.option("--track-name", default="bt747cli track", show_default=True, help="Track name in GPX.")
