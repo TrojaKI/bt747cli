@@ -11,6 +11,7 @@ from bt747cli.protocol import (
     _query_rec_method,
     _request_chunk,
     _verify_sentence,
+    download_log,
 )
 from bt747cli.connection import _pmtk_checksum
 
@@ -168,3 +169,26 @@ class TestComputeEndAddr:
 
     def test_stop_mode_capped_at_flash_size(self):
         assert _compute_end_addr(self.FLASH - 1, self.FLASH, REC_METHOD_STOP) == self.FLASH
+
+
+class TestDownloadLog:
+    """End-to-end download_log flow against a scripted mock device."""
+
+    def _device_lines(self, write_ptr: int, rec_method: int, chunk_hex: str) -> list[str]:
+        return [
+            _sentence("PMTK001,0,3"),                   # wakeup ACK
+            _sentence("PMTK182,3,9,C2201615"),          # flash ID → 4 MiB (1 << 0x16)
+            _sentence(f"PMTK182,3,7,{write_ptr:08X}"),  # write pointer
+            _sentence(f"PMTK182,3,6,{rec_method}"),     # recording method
+            _make_pmtk182_8(0, chunk_hex),              # first chunk (short read)
+        ]
+
+    def test_short_read_ends_download(self):
+        conn = _make_conn(self._device_lines(0x100, 2, "AABBCCDD"))
+        raw = download_log(conn, timeout=30.0)
+        assert raw == bytes.fromhex("AABBCCDD")
+
+    def test_expired_timeout_aborts_before_first_chunk(self):
+        conn = _make_conn(self._device_lines(0x100, 2, "AABBCCDD"))
+        raw = download_log(conn, timeout=0.0)
+        assert raw == b""

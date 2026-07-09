@@ -34,7 +34,7 @@ def build_pmtk(payload: str) -> bytes:
 class SerialConnection:
     """Manages the serial port connection to an MTK GPS logger."""
 
-    def __init__(self, port: str = DEFAULT_PORT, baud: int = DEFAULT_BAUD, timeout: float = 5.0):
+    def __init__(self, port: str = DEFAULT_PORT, baud: int = DEFAULT_BAUD, timeout: float = 1.0):
         self.port = port
         self.baud = baud
         self.timeout = timeout

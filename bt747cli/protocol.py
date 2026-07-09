@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 # Download chunk size – matches BT747 default logRequestStep.
 CHUNK_SIZE = 0x800
 
-# Number of seconds to wait for the device to finish sending all log data.
+# Default overall deadline for the whole download.
 DOWNLOAD_TIMEOUT = 300.0
 # Timeout for single query/response round-trips.
 QUERY_TIMEOUT = 5.0
@@ -268,7 +268,11 @@ def _request_chunk(conn: SerialConnection, addr: int, size: int, timeout: float)
     return None
 
 
-def download_log(conn: SerialConnection, progress_callback=None) -> bytes:
+def download_log(
+    conn: SerialConnection,
+    progress_callback=None,
+    timeout: float = DOWNLOAD_TIMEOUT,
+) -> bytes:
     """Download the full flash log from the device using PMTK182.
 
     Downloads in CHUNK_SIZE blocks; never crosses 0x10000-byte sector boundaries
@@ -277,6 +281,7 @@ def download_log(conn: SerialConnection, progress_callback=None) -> bytes:
     Args:
         conn: Open SerialConnection.
         progress_callback: Optional callable(bytes_received: int).
+        timeout: Overall deadline for the whole download in seconds.
 
     Returns:
         Raw binary log data.
@@ -302,8 +307,16 @@ def download_log(conn: SerialConnection, progress_callback=None) -> bytes:
     buf = bytearray()
     addr = 0
     chunk_timeout = max(QUERY_TIMEOUT, CHUNK_SIZE / 115200 * 10 * 2 + 2)
+    overall_deadline = time.monotonic() + timeout
 
     while addr < end_addr:
+        if time.monotonic() >= overall_deadline:
+            log.error(
+                "Download timeout (%.0f s) exceeded at addr 0x%08X – aborting.",
+                timeout, addr,
+            )
+            break
+
         remaining = end_addr - addr
         chunk = min(CHUNK_SIZE, remaining)
 

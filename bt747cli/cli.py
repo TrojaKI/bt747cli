@@ -171,8 +171,8 @@ def main(ctx: click.Context, verbose: bool) -> None:
 def cmd_download(ctx, port: str, baud: int, output: str, timeout: float) -> None:
     """Download raw flash-log from the GPS device."""
     click.echo(f"Connecting to {port} at {baud} baud …")
-    with SerialConnection(port=port, baud=baud, timeout=timeout) as conn:
-        raw = download_log(conn, progress_callback=_progress_echo)
+    with SerialConnection(port=port, baud=baud) as conn:
+        raw = download_log(conn, progress_callback=_progress_echo, timeout=timeout)
 
     if not raw:
         click.echo("ERROR: No data received from device.", err=True)
@@ -232,8 +232,8 @@ def cmd_export(ctx, input_file: str, output: str, date_from, date_to, split_days
 def cmd_run(ctx, port: str, baud: int, output: str, save_bin, date_from, date_to, split_days: bool, timeout: float, track_name: str) -> None:
     """Download log from device and export directly to GPX."""
     click.echo(f"Connecting to {port} at {baud} baud …")
-    with SerialConnection(port=port, baud=baud, timeout=timeout) as conn:
-        raw = download_log(conn, progress_callback=_progress_echo)
+    with SerialConnection(port=port, baud=baud) as conn:
+        raw = download_log(conn, progress_callback=_progress_echo, timeout=timeout)
 
     click.echo()  # newline after progress
 
