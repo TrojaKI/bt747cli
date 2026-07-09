@@ -166,7 +166,7 @@ def main(ctx: click.Context, verbose: bool) -> None:
 @click.option("--port", "-p", default=DEFAULT_PORT, show_default=True, help="Serial port device.")
 @click.option("--baud", "-b", default=DEFAULT_BAUD, show_default=True, help="Baud rate.")
 @click.option("--output", "-o", required=True, type=click.Path(dir_okay=False), help="Output .bin file.")
-@click.option("--timeout", default=300.0, show_default=True, help="Download timeout in seconds.")
+@click.option("--timeout", default=300.0, show_default=True, help="Timeout for the log data transfer in seconds.")
 @click.pass_context
 def cmd_download(ctx, port: str, baud: int, output: str, timeout: float) -> None:
     """Download raw flash-log from the GPS device."""
@@ -226,7 +226,7 @@ def cmd_export(ctx, input_file: str, output: str, date_from, date_to, split_days
 @click.option("--from", "date_from", default=None, callback=_parse_date, expose_value=True, is_eager=True, help="Start date/time filter (UTC).")
 @click.option("--to", "date_to", default=None, callback=_parse_date_end, expose_value=True, is_eager=True, help="End date/time filter (UTC).")
 @click.option("--split-days", is_flag=True, default=False, help="Write one GPX file per day.")
-@click.option("--timeout", default=300.0, show_default=True, help="Download timeout in seconds.")
+@click.option("--timeout", default=300.0, show_default=True, help="Timeout for the log data transfer in seconds.")
 @click.option("--track-name", default="bt747cli track", show_default=True, help="Track name in GPX.")
 @click.pass_context
 def cmd_run(ctx, port: str, baud: int, output: str, save_bin, date_from, date_to, split_days: bool, timeout: float, track_name: str) -> None:

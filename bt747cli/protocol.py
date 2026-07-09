@@ -29,6 +29,7 @@ from __future__ import annotations
 import binascii
 import logging
 import time
+from collections.abc import Callable
 
 from .connection import SerialConnection
 
@@ -270,7 +271,7 @@ def _request_chunk(conn: SerialConnection, addr: int, size: int, timeout: float)
 
 def download_log(
     conn: SerialConnection,
-    progress_callback=None,
+    progress_callback: Callable[[int], None] | None = None,
     timeout: float = DOWNLOAD_TIMEOUT,
 ) -> bytes:
     """Download the full flash log from the device using PMTK182.
