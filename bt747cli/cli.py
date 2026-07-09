@@ -50,7 +50,7 @@ def _parse_datetime(value: str, *, end_of_day: bool) -> datetime:
     try:
         dt = datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
-        raise click.BadParameter(f"Expected YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, got '{value}'")
+        raise click.BadParameter(f"Expected YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS, got '{value}'") from None
     if end_of_day:
         dt += timedelta(days=1) - timedelta(microseconds=1)
     return dt
